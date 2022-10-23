@@ -1,6 +1,4 @@
 
-import imp
-import comm
 from utils import *
 import torch
 from torch import nn
@@ -14,31 +12,12 @@ from tqdm import tqdm
 
 class GroundTrainer(object):
     
-    def __init__(self, model, train_set, valid_set, test_set, scheduler=None, gpus=None, num_worker=0):
-        self.rank = comm.get_rank()
-        self.world_size = comm.get_world_size()
-        self.gpus = gpus
+    def __init__(self, model, train_set, valid_set, test_set, device, num_worker=0):
+        
         self.num_worker = num_worker
 
-        if gpus is None:
-            self.device = torch.device("cpu")
-        else:
-            if len(gpus) != self.world_size:
-                error_msg = "World size is %d but found %d GPUs in the argument"
-                if self.world_size == 1:
-                    error_msg += ". Did you launch with `python -m torch.distributed.launch`?"
-                raise ValueError(error_msg % (self.world_size, len(gpus)))
-            self.device = torch.device(gpus[self.rank % len(gpus)])
-
-        if self.world_size > 1 and not dist.is_initialized():
-            if self.rank == 0:
-                logging.info("Initializing distributed process group")
-            backend = "gloo" if gpus is None else "nccl"
-            comm.init_process_group(backend, init_method="env://")
-
         
-        if self.world_size > 1:
-            model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
+        self.device = device
         if self.device.type == "cuda":
             model = model.cuda(self.device)
 
@@ -46,7 +25,7 @@ class GroundTrainer(object):
         self.train_set = train_set
         self.valid_set = valid_set
         self.test_set = test_set
-        self.scheduler = scheduler
+        
         
     def train(self, args):
         
@@ -74,8 +53,8 @@ class GroundTrainer(object):
         self.model.eval_compute_rule_weight(self.device)
 
 
-        if comm.get_rank() == 0:
-            logging.info('>>>>> RulE: Grounding-Training')
+        
+        logging.info('>>>>> RulE: Grounding-Training')
         
 
         best_valid_mrr = 0.0 
@@ -86,11 +65,11 @@ class GroundTrainer(object):
 
         for k in range(args.num_iters):
 
-            if comm.get_rank() == 0:
-                logging.info('-------------------------')
-                logging.info('| Iteration: {}/{}'.format(k + 1, args.num_iters))
-                logging.info('-------------------------')
             
+            logging.info('-------------------------')
+            logging.info('| Iteration: {}/{}'.format(k + 1, args.num_iters))
+            logging.info('-------------------------')
+        
             # if k >= warm_up_steps:
 
             #     current_learning_rate = current_learning_rate / 10
@@ -112,10 +91,10 @@ class GroundTrainer(object):
                 test_mrr = test_mrr_iter
                 self.save(args, os.path.join(args.save_path, 'grounding.pt'))
         
-        if comm.get_rank() == 0:
-            logging.info('-------------------------')
-            logging.info('| Final Test MRR: {:.6f}'.format(test_mrr))
-            logging.info('-------------------------')
+       
+        logging.info('-------------------------')
+        logging.info('| Final Test MRR: {:.6f}'.format(test_mrr))
+        logging.info('-------------------------')
 
 
     def train_step(self, optimizer, train_dataloader, batch_per_epoch, smoothing, print_every):
@@ -163,16 +142,17 @@ class GroundTrainer(object):
             
             if (batch_id + 1) % print_every == 0:
                 
-                if comm.get_rank() == 0:
-                    logging.info('loss:    {} {} {:.6f} {:.1f}'.format(batch_id + 1, len(train_dataloader), loss, total_size / print_every))
+                
+                logging.info('loss:    {} {} {:.6f} {:.1f}'.format(batch_id + 1, len(train_dataloader), loss, total_size / print_every))
                 
                 total_loss = 0.0
                 total_size = 0.0
+        
 
     @torch.no_grad()
     def evaluate(self, split, alpha=3.0, expectation=True):
-        if comm.get_rank() == 0:
-            logging.info('>>>>> Predictor: Evaluating on {}'.format(split))
+       
+        logging.info('>>>>> Predictor: Evaluating on {}'.format(split))
         test_set = getattr(self, "%s_set" % split)
         
         dataloader = DataLoader(test_set, 1, num_workers=self.num_worker)
@@ -266,40 +246,20 @@ class GroundTrainer(object):
         mr /= len(ranks)
         mrr /= len(ranks)
 
-        if comm.get_rank() == 0:
-            logging.info('Data : {}'.format(len(query2LH)))
-            logging.info('Hit1 : {:.6f}'.format(hit1))
-            logging.info('Hit3 : {:.6f}'.format(hit3))
-            logging.info('Hit10: {:.6f}'.format(hit10))
-            logging.info('MR   : {:.6f}'.format(mr))
-            logging.info('MRR  : {:.6f}'.format(mrr))
         
+        logging.info('Data : {}'.format(len(query2LH)))
+        logging.info('Hit1 : {:.6f}'.format(hit1))
+        logging.info('Hit3 : {:.6f}'.format(hit3))
+        logging.info('Hit10: {:.6f}'.format(hit10))
+        logging.info('MR   : {:.6f}'.format(mr))
+        logging.info('MRR  : {:.6f}'.format(mrr))
+    
         
         return mrr
 
 
-    def load(self, checkpoint, load_optimizer=True):
-        """
-        Load a checkpoint from file.
-        Parameters:
-            checkpoint (file-like): checkpoint file
-            load_optimizer (bool, optional): load optimizer state or not
-        """
-        if comm.get_rank() == 0:
-            logging.info("Load checkpoint from %s" % checkpoint)
-        checkpoint = os.path.expanduser(checkpoint)
-        state = torch.load(checkpoint, map_location=self.device)
+   
 
-        self.model.load_state_dict(state["model"])
-
-        if load_optimizer:
-            self.optimizer.load_state_dict(state["optimizer"])
-            for state in self.optimizer.state.values():
-                for k, v in state.items():
-                    if isinstance(v, torch.Tensor):
-                        state[k] = v.to(self.device)
-
-        comm.synchronize()
 
     def save(self, args, checkpoint):
         """
@@ -326,32 +286,13 @@ class GroundTrainer(object):
 
 class PreTrainer(object):
 
-    def __init__(self, graph, model, valid_set, test_set, tripletset, ruleset, expectation, scheduler=None, gpus=None, num_worker=0):
+    def __init__(self, graph, model, valid_set, test_set, tripletset, ruleset, expectation, device, num_worker=0):
         
-        self.rank = comm.get_rank()
-        self.world_size = comm.get_world_size()
-        self.gpus = gpus
+        
         self.num_worker = num_worker
-
-        if gpus is None:
-            self.device = torch.device("cpu")
-        else:
-            if len(gpus) != self.world_size:
-                error_msg = "World size is %d but found %d GPUs in the argument"
-                if self.world_size == 1:
-                    error_msg += ". Did you launch with `python -m torch.distributed.launch`?"
-                raise ValueError(error_msg % (self.world_size, len(gpus)))
-            self.device = torch.device(gpus[self.rank % len(gpus)])
-
-        if self.world_size > 1 and not dist.is_initialized():
-            if self.rank == 0:
-                logging.info("Initializing distributed process group")
-            backend = "gloo" if gpus is None else "nccl"
-            comm.init_process_group(backend, init_method="env://")
-
-        
-        if self.world_size > 1:
-            model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
+        self.device = device
+      
+       
         if self.device.type == "cuda":
             model = model.cuda(self.device)
 
@@ -362,7 +303,7 @@ class PreTrainer(object):
         self.TripletSet = tripletset
         self.RuleSet = ruleset
         self.expectation = expectation
-
+        
 
     
     def train(self, args):
@@ -391,8 +332,8 @@ class PreTrainer(object):
             filter(lambda p: p.requires_grad, self.model.parameters()), 
             lr=current_learning_rate
         )
-        if comm.get_rank == 0:
-            logging.info('>>>>> ruleE: Pre-training')
+       
+        logging.info('>>>>> ruleE: Pre-training')
         training_logs = []
         best_mrr = 0.0
 
@@ -507,13 +448,13 @@ class PreTrainer(object):
             'negative_rule_loss': negative_rule_loss.item(),
             'loss': loss.item()
         }
-
+       
         return log
 
     @torch.no_grad()
     def evaluate(self, split, expectation=True):
-        if comm.get_rank() == 0:
-            logging.info('>>>>> RuleE emb: Evaluating on {}'.format(split))
+        
+        logging.info('>>>>> RuleE emb: Evaluating on {}'.format(split))
         
         test_set = getattr(self, "%s_set" % split)
         # test_set = self.test_set_data
@@ -601,13 +542,13 @@ class PreTrainer(object):
         mr /= len(ranks)
         mrr /= len(ranks)
 
-        if comm.get_rank() == 0:
-            logging.info('Data : {}'.format(len(query2LH)))
-            logging.info('Hit1 : {:.6f}'.format(hit1))
-            logging.info('Hit3 : {:.6f}'.format(hit3))
-            logging.info('Hit10: {:.6f}'.format(hit10))
-            logging.info('MR   : {:.6f}'.format(mr))
-            logging.info('MRR  : {:.6f}'.format(mrr))
+        
+        logging.info('Data : {}'.format(len(query2LH)))
+        logging.info('Hit1 : {:.6f}'.format(hit1))
+        logging.info('Hit3 : {:.6f}'.format(hit3))
+        logging.info('Hit10: {:.6f}'.format(hit10))
+        logging.info('MR   : {:.6f}'.format(mr))
+        logging.info('MRR  : {:.6f}'.format(mrr))
 
         return mrr
 
@@ -618,8 +559,8 @@ class PreTrainer(object):
             checkpoint (file-like): checkpoint file
             load_optimizer (bool, optional): load optimizer state or not
         """
-        if comm.get_rank() == 0:
-            logging.info("Load checkpoint from %s" % checkpoint)
+        
+        logging.info("Load checkpoint from %s" % checkpoint)
         checkpoint = os.path.expanduser(checkpoint)
         state = torch.load(checkpoint, map_location=self.device)
 
@@ -632,7 +573,6 @@ class PreTrainer(object):
                     if isinstance(v, torch.Tensor):
                         state[k] = v.to(self.device)
 
-        comm.synchronize()
 
     def save(self, checkpoint):
         """
@@ -640,8 +580,8 @@ class PreTrainer(object):
         Parameters:
             checkpoint (file-like): checkpoint file
         """
-        if comm.get_rank() == 0:
-            logging.info("Save checkpoint to %s" % checkpoint)
+       
+        logging.info("Save checkpoint to %s" % checkpoint)
         checkpoint = os.path.expanduser(checkpoint)
         if self.rank == 0:
             state = {
@@ -650,7 +590,6 @@ class PreTrainer(object):
             }
             torch.save(state, checkpoint)
 
-        comm.synchronize()
 
 
 def log_metrics(mode, step, metrics):

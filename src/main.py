@@ -6,7 +6,7 @@ from data import KnowledgeGraph, TrainDataset, ValidDataset, TestDataset, RuleDa
 from model import RulE
 from utils import load_config, save_config, set_logger, set_seed
 from trainer import GroundTrainer, PreTrainer
-import comm
+
 
 def save_files(rules):
     with open('mined_rules.txt','w') as fw:
@@ -31,12 +31,13 @@ def parse_args(args=None):
         description='RNNLogic',
         usage='train.py [<args>] [-h | --help]'
     )
+    parser.add_argument("--local_rank", type=int, default=0)
     # data path
     parser.add_argument('--data_path', default="../data/wn18rr", type=str, help='dataset path')
     parser.add_argument('--rule_file', default="../data/wn18rr/mined_rules.txt", type=str)
     # device 
-    # parser.add_argument('--cuda', action='store_true',default=True, help='use GPU')
-    parser.add_argument('--gpus', default='[0]', help='use GPU')
+    parser.add_argument('--cuda', action='store_true',default=True, help='use GPU')
+   
     parser.add_argument('-cpu', '--cpu_num', default=10, type=int)
 
     parser.add_argument('--seed',default=800, type=int, help='seed')
@@ -67,7 +68,7 @@ def parse_args(args=None):
     parser.add_argument('--max_steps', default=15000, type=int)
 
     # save path
-    parser.add_argument('-init', '--init_checkpoint_config', default="/home/txx/ruleE/RulE_code/config/umls_config.json", type=str)
+    parser.add_argument('-init', '--init_checkpoint_config', default="/home/xiaojuan/ruleE/RulE/config/umls_config.json", type=str)
     parser.add_argument('-save', '--save_path', default=None, type=str)
 
     # RNN parameters
@@ -128,7 +129,11 @@ def main(args):
     RulE_model = RulE(graph, args.mlp_rule_dim, args.gamma_fact, args.gamma_rule, args.hidden_dim, args.rule_dim, args.rnn_hidden_dim, args.num_layers)
     RulE_model.set_rules(rules)
 
-    
+    if args.cuda:
+        device = torch.device('cuda')
+    else:
+        device = torch.device('cpu')
+   
     # For pre-training 
 
     pre_trainer = PreTrainer(
@@ -139,15 +144,15 @@ def main(args):
         tripletset=kge_train_set,
         ruleset=ruleset,
         expectation=True,
-        gpus=args.gpus,
+        device = device,
         num_worker=args.cpu_num
         
     )
 
     pre_trainer.train(args)
     
-    if comm.get_rank() == 0:
-        logging.info('Finishing pre-training!')
+    
+    logging.info('Finishing pre-training!')
 
     print("loading RulE trainer......")
 
@@ -156,8 +161,8 @@ def main(args):
     checkpoint = torch.load(os.path.join(args.save_path, 'checkpoint'))
     RulE_model.load_state_dict(checkpoint['model'])
 
-    if comm.get_rank() == 0:
-        logging.info('Test the results of pre-training')
+    
+    logging.info('Test the results of pre-training')
     
     test_mrr = pre_trainer.evaluate('test', expectation=True)
     
@@ -166,7 +171,7 @@ def main(args):
         train_set=train_set,
         valid_set=valid_set,
         test_set=test_set,
-        gpus=args.gpus,
+        device=device,
         num_worker=args.cpu_num
     )
     

@@ -3,7 +3,7 @@
 This is an implementation of the [RulE]() model for knowledge graph reasoning. **RulE** is a novel and principled framework to represent and model logical rules and triplets. It jointly represents entities, relations and logical rules in a unified embedding space. By learning rule embeddings, it can improve the generalization capability of KGE and improve logical rule reasoning. 
 
 ## Overview 
-[figure]
+![figure](figures/overall.png)
 This is the overall architecture of RulE, consisting of three components: pre-training, grounding, inference.
 ## Datasets
 Datasets used are contained in the folder ```data/```. Considering some rule with inverse relation, we add the inverse version triplets for each triplet. The format is as follows:

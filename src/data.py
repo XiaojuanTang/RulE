@@ -8,8 +8,8 @@ from easydict import EasyDict
 from torch.nn.utils.rnn import pad_sequence
 
 
-class RulERuleDataset(Dataset):
-    def __init__(self, num_relations, input, negative_sample_size, mode='rule-batch'):
+class RuleDataset(Dataset):
+    def __init__(self, num_relations, input, negative_sample_size, mode='batch'):
         self.rules = list()
         self.num_relations = num_relations
         # self.ending_idx = num_relations
@@ -17,54 +17,42 @@ class RulERuleDataset(Dataset):
         self.negative_sample_size = negative_sample_size
         self.mode = mode
         idx = 0
-        if type(input) == list:
-            rules = input
-        elif type(input) == str:
-            rules = list()
-            self.rules_p = []
-            with open(input, 'r') as fi:
-                for line in fi:
-                    rule = line.strip().split()
-                    
-                    if len(rule) <= 2:
-                        continue
-
-                    rule = [idx] + [int(_) for _ in rule[0:-1]] + [float(rule[-1]) * 1000]
-                    # rule = [int(_) for _ in rule[0:-1]] + [float(rule[-1])
-                    rules.append(rule)
-                    idx += 1
-                    self.rules_p.append(rule)
 
         self.rules = []
-        for rule in rules:
-            rule_len = len(rule)
-            formatted_rule = [rule[0:-1], self.padding_idx, rule[-1] + 1e-5]
-            self.rules.append(formatted_rule)
+        with open(input, 'r') as fi:
+            for line in fi:
+                rule = line.strip().split()
+                if len(rule) <= 1:
+                    continue
+                rule = [idx] + [int(_) for _ in rule]
+                idx += 1
+                formatted_rule = [rule, self.padding_idx]
+                self.rules.append(formatted_rule)
+            
     
     def __len__(self):
         return len(self.rules)
 
     def __getitem__(self, idx):
         positive_sample = self.rules[idx]
+
+        # negative samping
         negative_idx = np.random.randint(len(positive_sample[0])-1 ,size=self.negative_sample_size)
-        negative_sample = np.random.randint(self.num_relations, size=self.negative_sample_size)
-        
-        rule_len = len(positive_sample[0])-1
+        negative_sample = np.random.randint(self.num_relations, size=self.negative_sample_size)  
         negative_idx = torch.LongTensor(negative_idx)
         negative_sample = torch.LongTensor(negative_sample)
+
+        # set rule mask to get the last element of during RNN
         rule_mask = torch.zeros(len(positive_sample[0])-2).bool()
         rule_mask[-1] = True
-        # positive_sample = torch.LongTensor(positive_sample)
-        # positive_sample_inv = torch.LongTensor(positive_sample_inv)    
+        
         return positive_sample, negative_idx, negative_sample, self.mode, rule_mask  
-        # return self.rules[idx]
+        
 
     @staticmethod
     def collate_fn(data):
 
-        positive_sample = pad_sequence([torch.LongTensor(_[0][0]) for _ in data], batch_first=True,padding_value=data[0][0][-2])
-        # positive_sample_inv = pad_sequence([_[1] for _ in data], batch_first=True)
-        # mask = (positive_sample[:,1:] != torch.tensor(data[0][0][-2], dtype=torch.long))
+        positive_sample = pad_sequence([torch.LongTensor(_[0][0]) for _ in data], batch_first=True,padding_value=data[0][0][-1])
         negative_idx = torch.stack([_[1] for _ in data], dim=0)
         negative_sample = torch.stack([_[2] for _ in data], dim=0)
         mode = data[0][3]
@@ -72,26 +60,8 @@ class RulERuleDataset(Dataset):
         
         return positive_sample, negative_idx, negative_sample, mode, rule_mask
 
-        # data = r_data
-        # inputs = [item[0] for item in data]
-        # # target = [item[0][1:len(item[0])] for item in data]
-        # # weight = [float(item[-1]) for item in data]
-        # max_len = max([len(_) for _ in inputs])
-        # padding_index = [int(item[-2]) for item in data]
 
-        # for k in range(len(data)):
-        #     for i in range(max_len - len(inputs[k])):
-        #         inputs[k].append(padding_index[k])
-        #         # target[k].append(padding_index[k])
-
-        # inputs = torch.tensor(inputs, dtype=torch.long)
-        # # target = torch.tensor(target, dtype=torch.long)
-        # # weight = torch.tensor(weight)
-        # # mask = (target != torch.tensor(padding_index, dtype=torch.long).unsqueeze(1))
-
-       
-
-class RuleETrainDataset(Dataset):
+class KGETrainDataset(Dataset):
     def __init__(self, triples, nentity, nrelation, negative_sample_size, mode):
         self.len = len(triples)
         self.triples = triples
@@ -119,22 +89,12 @@ class RuleETrainDataset(Dataset):
 
         while negative_sample_size < self.negative_sample_size:
             negative_sample = np.random.randint(self.nentity, size=self.negative_sample_size*2)
-            if self.mode == 'head-batch':
-                mask = np.in1d(
-                    negative_sample, 
-                    self.true_head[(relation, tail)], 
-                    assume_unique=True, 
-                    invert=True
-                )
-            elif self.mode == 'tail-batch':
-                mask = np.in1d(
-                    negative_sample, 
-                    self.true_tail[(head, relation)], 
-                    assume_unique=True, 
-                    invert=True
-                )
-            else:
-                raise ValueError('Training batch mode %s not supported' % self.mode)
+            mask = np.in1d(
+                negative_sample, 
+                self.true_tail[(head, relation)], 
+                assume_unique=True, 
+                invert=True
+            )
             negative_sample = negative_sample[mask]
             negative_sample_list.append(negative_sample)
             negative_sample_size += negative_sample.size
@@ -266,13 +226,13 @@ class KnowledgeGraph(object):
         self.entity_size = len(self.entity2id)
         self.relation_size = len(self.relation2id)
         
-        self.train_facts_KGE = list()
+        
         self.train_facts = list()
         self.valid_facts = list()
         self.test_facts = list()
-        self.hr2o = dict()
-        self.hr2oo = dict()
-        self.hr2ooo = dict()
+        self.hr2o = dict()          # only contain training set
+        self.hr2oo = dict()         # contain training and valid set
+        self.hr2ooo = dict()        # contain training, valid and test set
         self.relation2adjacency = [[[], []] for k in range(self.relation_size)]
         self.relation2ht2index = [dict() for k in range(self.relation_size)]
         self.relation2outdegree = [[0 for i in range(self.entity_size)] for k in range(self.relation_size)]
@@ -283,7 +243,6 @@ class KnowledgeGraph(object):
                 h, r, t = self.entity2id[h], self.relation2id[r], self.entity2id[t]
                 self.train_facts.append((h, r, t))
                 
-                self.train_facts_KGE.append((h, r, t))
                 
                 hr_index = self.encode_hr(h, r)
                 if hr_index not in self.hr2o:
@@ -298,6 +257,7 @@ class KnowledgeGraph(object):
                     self.hr2ooo[hr_index] = list()
                 self.hr2ooo[hr_index].append(t)
 
+            
                 self.relation2adjacency[r][0].append(t)
                 self.relation2adjacency[r][1].append(h)
 
@@ -535,68 +495,11 @@ class TestDataset(Dataset):
 
         return all_h, all_r, all_t, mask
 
-class RuleDataset(Dataset):
-    def __init__(self, num_relations, input):
-        self.rules = list()
-        self.num_relations = num_relations
-        self.ending_idx = num_relations
-        self.padding_idx = num_relations + 1
-        
-        if type(input) == list:
-            rules = input
-        elif type(input) == str:
-            rules = list()
-            self.rules = []
-            with open(input, 'r') as fi:
-                for line in fi:
-                    rule = line.strip().split()
-                    if len(rule) <= 2:
-                        continue
-                    rule = [int(_) for _ in rule[0:-1]] + [float(rule[-1]) * 1000]
-                    # rule = [int(_) for _ in rule[0:-1]] + [float(rule[-1])]
-
-                    rules.append(rule)
-                    self.rules.append(rule)
-        # self.rules = []
-        # for rule in rules:
-        #     rule_len = len(rule)
-        #     formatted_rule = [rule[0:-1] + [self.ending_idx], self.padding_idx, rule[-1] + 1e-5]
-        #     self.rules.append(formatted_rule)
-    
-    def __len__(self):
-        return len(self.rules)
-
-    def __getitem__(self, idx):
-        return self.rules[idx]
-
-    @staticmethod
-    def collate_fn(data):
-        inputs = [item[0][0:len(item[0])-1] for item in data]
-        target = [item[0][1:len(item[0])] for item in data]
-        weight = [float(item[-1]) for item in data]
-        max_len = max([len(_) for _ in inputs])
-        padding_index = [int(item[-2]) for item in data]
-        
-        for k in range(len(data)):
-            for i in range(max_len - len(inputs[k])):
-                inputs[k].append(padding_index[k])
-                target[k].append(padding_index[k])
-
-        inputs = torch.tensor(inputs, dtype=torch.long)
-        target = torch.tensor(target, dtype=torch.long)
-        weight = torch.tensor(weight)
-        mask = (target != torch.tensor(padding_index, dtype=torch.long).unsqueeze(1))
-
-        return inputs, target, mask, weight
-
 def Iterator(dataloader):
     while True:
         for data in dataloader:
             yield data
 
-
-
-    
 class BidirectionalOneShotIterator(object):
     def __init__(self, dataloader_head, dataloader_tail):
         self.iterator_head = self.one_shot_iterator(dataloader_head)
@@ -609,25 +512,6 @@ class BidirectionalOneShotIterator(object):
             data = next(self.iterator_head)
         else:
             data = next(self.iterator_tail)
-        return data
-    
-    @staticmethod
-    def one_shot_iterator(dataloader):
-        '''
-        Transform a PyTorch Dataloader into python iterator
-        '''
-        while True:
-            for data in dataloader:
-                yield data
-
-class RuleIterator(object):
-    def __init__(self, dataloader_relation):
-        self.iterator_relation = self.one_shot_iterator(dataloader_relation)
-       
-        
-    def __next__(self):
-        
-        data = next(self.iterator_relation)
         return data
     
     @staticmethod

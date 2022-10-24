@@ -68,7 +68,7 @@ def parse_args(args=None):
     parser.add_argument('--max_steps', default=15000, type=int)
 
     # save path
-    parser.add_argument('-init', '--init_checkpoint_config', default="/home/xiaojuan/ruleE/RulE/config/umls_config.json", type=str)
+    parser.add_argument('-init', '--init_checkpoint_config', default="../config/umls_config.json", type=str)
     parser.add_argument('-save', '--save_path', default=None, type=str)
 
     # RNN parameters

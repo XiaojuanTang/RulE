@@ -2,5 +2,6 @@ easydict==1.9
 numpy==1.21.5
 PyYAML==6.0
 torch==1.11.0
-torch_scatter==2.0.9
-wandb==0.13.1
+torchvision==0.12.0
+torchaudio==0.11.0
+torch-scatter==2.0.9

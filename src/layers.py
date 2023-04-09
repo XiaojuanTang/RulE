@@ -55,10 +55,9 @@ class FuncToNodeSum(nn.Module):
         self.vector_dim = vector_dim
         self.layer_norm = nn.LayerNorm(self.vector_dim)
         self.add_model = MLP(self.vector_dim, [self.vector_dim])
-        for param in self.add_model.parameters():
-            param.requires_grad = False
+        # for param in self.add_model.parameters():
+        #     param.requires_grad = False
         
-        self.eps = 1e-6
     
     def forward(self, A_fn, x_f, mlp_rule_feature):
         
@@ -70,6 +69,26 @@ class FuncToNodeSum(nn.Module):
         weighted_features_norm = self.layer_norm(weighted_features)
         weighted_features_relu = torch.relu(weighted_features_norm)
         output = weighted_features_relu.mean(1)
-
+        
         return output
 
+
+    # def forward(self, A_fn, x_f):
+        
+    #     # batch_size = b_n.max().item() + 1
+
+        
+    #     weight = torch.transpose(A_fn, 0, 1).unsqueeze(-1)
+    #     message = x_f.unsqueeze(0)
+
+
+    #     features = (message * weight).sum(1)
+    #     # features = (message * weight).mean(1)
+
+    #     # features = (message * weight).max(1)[0]
+
+    #     output = self.add_model(features)
+    #     output = self.layer_norm(output)
+    #     output = torch.relu(output)
+
+    #     return output

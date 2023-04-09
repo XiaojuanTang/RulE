@@ -13,7 +13,7 @@ class RuleDataset(Dataset):
         self.rules = list()
         self.num_relations = num_relations
         # self.ending_idx = num_relations
-        self.padding_idx = num_relations 
+        self.padding_idx = num_relations * 2 
         self.negative_sample_size = negative_sample_size
         self.mode = mode
         idx = 0
@@ -37,26 +37,33 @@ class RuleDataset(Dataset):
         positive_sample = self.rules[idx]
 
         # negative samping
+        # negative_idx = np.zeros(self.negative_sample_size)
         negative_idx = np.random.randint(len(positive_sample[0])-1 ,size=self.negative_sample_size)
+        
         negative_sample = np.random.randint(self.num_relations, size=self.negative_sample_size)  
         negative_idx = torch.LongTensor(negative_idx)
         negative_sample = torch.LongTensor(negative_sample)
 
-        # set rule mask to get the last element of during RNN
-        rule_mask = torch.zeros(len(positive_sample[0])-2).bool()
-        rule_mask[-1] = True
+        # # set rule mask to get the last element of during RNN
+        # rule_mask = torch.zeros(len(positive_sample[0])-2).bool()
         
+        # rule_mask[-1] = True
+
+        # # set rule mask to get the last element of during RotatE3D
+        rule_mask = torch.ones(len(positive_sample[0])-2).bool()
+        # rule_mask[-1] = False
+
         return positive_sample, negative_idx, negative_sample, self.mode, rule_mask  
         
 
     @staticmethod
     def collate_fn(data):
 
-        positive_sample = pad_sequence([torch.LongTensor(_[0][0]) for _ in data], batch_first=True,padding_value=data[0][0][-1])
+        positive_sample = pad_sequence([torch.LongTensor(_[0][0]) for _ in data], batch_first=True, padding_value=data[0][0][-1])
         negative_idx = torch.stack([_[1] for _ in data], dim=0)
         negative_sample = torch.stack([_[2] for _ in data], dim=0)
         mode = data[0][3]
-        rule_mask = pad_sequence([_[4] for _ in data], batch_first=True,padding_value=False)
+        rule_mask = pad_sequence([_[4] for _ in data], batch_first=True, padding_value=False)
         
         return positive_sample, negative_idx, negative_sample, mode, rule_mask
 
@@ -89,12 +96,22 @@ class KGETrainDataset(Dataset):
 
         while negative_sample_size < self.negative_sample_size:
             negative_sample = np.random.randint(self.nentity, size=self.negative_sample_size*2)
-            mask = np.in1d(
-                negative_sample, 
-                self.true_tail[(head, relation)], 
-                assume_unique=True, 
-                invert=True
-            )
+            if self.mode == 'head-batch':
+                mask = np.in1d(
+                    negative_sample, 
+                    self.true_head[(relation, tail)], 
+                    assume_unique=True, 
+                    invert=True
+                )
+            elif self.mode == 'tail-batch':
+                mask = np.in1d(
+                    negative_sample, 
+                    self.true_tail[(head, relation)], 
+                    assume_unique=True, 
+                    invert=True
+                )
+            else:
+                raise ValueError('Training batch mode %s not supported' % self.mode)
             negative_sample = negative_sample[mask]
             negative_sample_list.append(negative_sample)
             negative_sample_size += negative_sample.size
@@ -228,21 +245,23 @@ class KnowledgeGraph(object):
         
         
         self.train_facts = list()
+        self.ground_train_facts = list()
         self.valid_facts = list()
         self.test_facts = list()
         self.hr2o = dict()          # only contain training set
         self.hr2oo = dict()         # contain training and valid set
         self.hr2ooo = dict()        # contain training, valid and test set
-        self.relation2adjacency = [[[], []] for k in range(self.relation_size)]
-        self.relation2ht2index = [dict() for k in range(self.relation_size)]
-        self.relation2outdegree = [[0 for i in range(self.entity_size)] for k in range(self.relation_size)]
+        self.relation2adjacency = [[[], []] for k in range(self.relation_size*2)]
+        self.relation2ht2index = [dict() for k in range(self.relation_size*2)]
+        self.relation2outdegree = [[0 for i in range(self.entity_size)] for k in range(self.relation_size*2)]
 
         with open(os.path.join(data_path, "train.txt")) as fi:
             for line in fi:
                 h, r, t = line.strip().split('\t')
                 h, r, t = self.entity2id[h], self.relation2id[r], self.entity2id[t]
                 self.train_facts.append((h, r, t))
-                
+                self.ground_train_facts.append((h,r,t))
+                # self.ground_train_facts.append((t, r + self.relation_size, t))
                 
                 hr_index = self.encode_hr(h, r)
                 if hr_index not in self.hr2o:
@@ -268,12 +287,53 @@ class KnowledgeGraph(object):
 
                 self.relation2outdegree[r][t] += 1
 
+                # get inverse facts
+                h, r, t = line.strip().split('\t')
+                h, r, t = self.entity2id[t], self.relation2id[r] + self.relation_size, self.entity2id[h]
+                self.ground_train_facts.append((h,r,t))
 
+                hr_index = self.encode_hr(h, r)
+                if hr_index not in self.hr2o:
+                    self.hr2o[hr_index] = list()
+                self.hr2o[hr_index].append(t)
+
+                if hr_index not in self.hr2oo:
+                    self.hr2oo[hr_index] = list()
+                self.hr2oo[hr_index].append(t)
+
+                if hr_index not in self.hr2ooo:
+                    self.hr2ooo[hr_index] = list()
+                self.hr2ooo[hr_index].append(t)
+
+            
+                self.relation2adjacency[r][0].append(t)
+                self.relation2adjacency[r][1].append(h)
+
+                ht_index = self.encode_ht(h, t)
+                assert ht_index not in self.relation2ht2index[r]
+                index = len(self.relation2ht2index[r])
+                self.relation2ht2index[r][ht_index] = index
+
+                self.relation2outdegree[r][t] += 1
 
         with open(os.path.join(data_path, "valid.txt")) as fi:
             for line in fi:
                 h, r, t = line.strip().split('\t')
                 h, r, t = self.entity2id[h], self.relation2id[r], self.entity2id[t]
+                self.valid_facts.append((h, r, t))
+
+                hr_index = self.encode_hr(h, r)
+
+                if hr_index not in self.hr2oo:
+                    self.hr2oo[hr_index] = list()
+                self.hr2oo[hr_index].append(t)
+
+                if hr_index not in self.hr2ooo:
+                    self.hr2ooo[hr_index] = list()
+                self.hr2ooo[hr_index].append(t)
+
+                h, r, t = line.strip().split('\t')
+                h, r, t = self.entity2id[t], self.relation2id[r] + self.relation_size, self.entity2id[h]
                 self.valid_facts.append((h, r, t))
 
                 hr_index = self.encode_hr(h, r)
@@ -300,8 +360,19 @@ class KnowledgeGraph(object):
                     self.hr2ooo[hr_index] = list()
                 self.hr2ooo[hr_index].append(t)
 
+                h, r, t = line.strip().split('\t')
+                h, r, t = self.entity2id[t], self.relation2id[r]+self.relation_size, self.entity2id[h]
+                self.test_facts.append((h, r, t))
 
-        for r in range(self.relation_size):
+                hr_index = self.encode_hr(h, r)
+
+                if hr_index not in self.hr2ooo:
+                    self.hr2ooo[hr_index] = list()
+                self.hr2ooo[hr_index].append(t)
+
+
+
+        for r in range(self.relation_size * 2):
             index = torch.LongTensor(self.relation2adjacency[r])
             value = torch.ones(index.size(1))
             self.relation2adjacency[r] = [index, value]
@@ -380,14 +451,14 @@ class TrainDataset(Dataset):
         self.graph = graph
         self.batch_size = batch_size
 
-        self.r2instances = [[] for r in range(self.graph.relation_size)]
-        for h, r, t in self.graph.train_facts:
+        self.r2instances = [[] for r in range(self.graph.relation_size * 2)]
+        for h, r, t in self.graph.ground_train_facts:
             self.r2instances[r].append((h, r, t))
 
         self.make_batches()
 
     def make_batches(self):
-        for r in range(self.graph.relation_size):
+        for r in range(self.graph.relation_size * 2):
             random.shuffle(self.r2instances[r])
 
         self.batches = list()
@@ -428,7 +499,7 @@ class ValidDataset(Dataset):
 
         facts = self.graph.valid_facts
 
-        r2instances = [[] for r in range(self.graph.relation_size)]
+        r2instances = [[] for r in range(self.graph.relation_size * 2)]
         for h, r, t in facts:
             r2instances[r].append((h, r, t))
 
@@ -465,7 +536,7 @@ class TestDataset(Dataset):
 
         facts = self.graph.test_facts
 
-        r2instances = [[] for r in range(self.graph.relation_size)]
+        r2instances = [[] for r in range(self.graph.relation_size * 2)]
         for h, r, t in facts:
             r2instances[r].append((h, r, t))
 
@@ -522,3 +593,4 @@ class BidirectionalOneShotIterator(object):
         while True:
             for data in dataloader:
                 yield data
+

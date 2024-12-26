@@ -152,7 +152,7 @@ def main():
     # valid_mrr = pre_trainer.evaluate('valid', expectation=True)
     # test_mrr = pre_trainer.evaluate('test', expectation=True)
     
-    # pre_trainer.train(args)
+    pre_trainer.train(args)
     
     
     logging.info('Finishing pre-training!')

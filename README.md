@@ -30,7 +30,7 @@ The folder ``config/`` contain the configuration file of each dataset and the fo
 
 ```
 
-umls_config.json
+python main.py --config ../config/umls_config.json
 ```
 
 ## Results

@@ -433,10 +433,10 @@ class GroundTrainer(object):
             #     )
             #     warm_up_steps = warm_up_steps * 3
 
-            self.train_step( optimizer, train_dataloader, args.batch_per_epoch, args.smoothing, args.print_every)
+            self.train_step( optimizer, train_dataloader, args.batch_per_epoch, args.smoothing, args.print_every, args)
             valid_mrr_iter = self.evaluate('valid', args.alpha, expectation=True)
-            test_mrr_iter = self.evaluate('test', args.alpha, expectation=True)
-            test_mrr_iter = self.evaluate_t('test_kge', args.alpha, expectation=True)
+            # test_mrr_iter = self.evaluate('test', args.alpha, expectation=True)
+            # test_mrr_iter = self.evaluate_t('test_kge', args.alpha, expectation=True)
             
 
             if valid_mrr_iter > best_valid_mrr:
@@ -444,7 +444,7 @@ class GroundTrainer(object):
                 test_mrr = test_mrr_iter
                 self.save(args, os.path.join(args.save_path, 'grounding.pt'))
         
-       
+
         logging.info('-------------------------')
         logging.info('| Final Test MRR: {:.6f}'.format(test_mrr))
         logging.info('-------------------------')
@@ -460,7 +460,7 @@ class GroundTrainer(object):
        
        
 
-    def train_step(self, optimizer, train_dataloader, batch_per_epoch, smoothing, print_every):
+    def train_step(self, optimizer, train_dataloader, batch_per_epoch, smoothing, print_every, args):
         
         batch_per_epoch = batch_per_epoch or len(train_dataloader)
         model = self.model
@@ -516,11 +516,12 @@ class GroundTrainer(object):
                 
                 total_loss = 0.0
                 total_size = 0.0
+                self.save(args, os.path.join(args.save_path, 'grounding.pt'))
         
 
     @torch.no_grad()
     def evaluate(self, split, alpha=3.0, expectation=True):
-       
+
         logging.info('>>>>> Predictor: Evaluating on {}'.format(split))
         test_set = getattr(self, "%s_set" % split)
         

@@ -7,7 +7,7 @@ from layers import MLP, FuncToNodeSum
 from torch.nn.utils.rnn import pad_sequence
 
 class RulE(torch.nn.Module):
-    def __init__(self, graph, p_norm, mlp_rule_dim, gamma_fact, gamma_rule, hidden_dim, device):
+    def __init__(self, graph, p_norm, mlp_rule_dim, gamma_fact, gamma_rule, hidden_dim, device, dataset):
         super(RulE, self).__init__()
         self.graph = graph
         self.device = device
@@ -29,7 +29,10 @@ class RulE(torch.nn.Module):
         
         self.rule_to_entity = FuncToNodeSum(self.mlp_rule_dim)
 
-        self.score_model = MLP(self.mlp_rule_dim, [ 1]) 
+        if "FB15k-237" in dataset or "wn18rr" in dataset or "YAGO3-10" in dataset:
+            self.score_model = MLP(self.mlp_rule_dim, [128, 1]) 
+        else:
+            self.score_model = MLP(self.mlp_rule_dim, [1]) 
 
         self.bias = torch.nn.parameter.Parameter(torch.zeros(self.num_entities))
         
@@ -89,23 +92,23 @@ class RulE(torch.nn.Module):
         
         self.pi = 3.14159262358979323846
 
-    def add_param(self):
+    # def add_param(self):
 
-        self.mlp_rule_dim = 16
-        self.mlp_feature = nn.Parameter(torch.zeros(self.num_rules, self.mlp_rule_dim))
-        # nn.init.kaiming_uniform_(self.mlp_feature, a=math.sqrt(5), mode="fan_in")
+    #     # self.mlp_rule_dim = 16
+    #     self.mlp_feature = nn.Parameter(torch.zeros(self.num_rules, self.mlp_rule_dim))
+    #     # nn.init.kaiming_uniform_(self.mlp_feature, a=math.sqrt(5), mode="fan_in")
         
-        # self.beta = nn.Parameter(torch.zeros((self.num_relations * 2)))
-        # torch.nn.init.uniform_(self.beta, a=0, b=1)
+    #     # self.beta = nn.Parameter(torch.zeros((self.num_relations * 2)))
+    #     # torch.nn.init.uniform_(self.beta, a=0, b=1)
         
-        self.rule_to_entity = FuncToNodeSum(self.mlp_rule_dim)
+    #     self.rule_to_entity = FuncToNodeSum(self.mlp_rule_dim)
 
-        # self.relation_emb = torch.nn.Embedding(self.num_relations, self.mlp_rule_dim)
-        self.score_model = MLP(self.mlp_rule_dim, [128, 1]) # 128 for FB15k
+    #     # self.relation_emb = torch.nn.Embedding(self.num_relations, self.mlp_rule_dim)
+    #     self.score_model = MLP(self.mlp_rule_dim, [128, 1]) # 128 for FB15k
         
-        # if self.device.type == "cuda":
-        #     self.score_model = self.score_model.cuda(self.device)
-        #     self.rule_to_entity = self.rule_to_entity.cuda(self.device)
+    #     # if self.device.type == "cuda":
+    #     #     self.score_model = self.score_model.cuda(self.device)
+    #     #     self.rule_to_entity = self.rule_to_entity.cuda(self.device)
 
     def set_rules(self, input):
         # input: [rule_id, rule_head, rule_body]

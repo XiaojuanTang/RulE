@@ -32,7 +32,7 @@
     "smoothing": 0.2,
     "batch_per_epoch": 1000000,
     "print_every": 1000,
-    "g_batch_size": 16,
+    "g_batch_size": 4,
     "g_lr": 0.01,
     "weight_decay": 0,
     "num_iters": 20,

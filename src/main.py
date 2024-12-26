@@ -126,9 +126,9 @@ def main():
     else:
         device = torch.device('cpu')
 
-    RulE_model = RulE(graph, args.p_norm, args.mlp_rule_dim, args.gamma_fact, args.gamma_rule, args.hidden_dim, device)
+    RulE_model = RulE(graph, args.p_norm, args.mlp_rule_dim, args.gamma_fact, args.gamma_rule, args.hidden_dim, device, args.data_path)
     RulE_model.set_rules(rules)
-  
+
     
     # For pre-training 
 
@@ -152,7 +152,7 @@ def main():
     # valid_mrr = pre_trainer.evaluate('valid', expectation=True)
     # test_mrr = pre_trainer.evaluate('test', expectation=True)
     
-    pre_trainer.train(args)
+    # pre_trainer.train(args)
     
     
     logging.info('Finishing pre-training!')
@@ -170,7 +170,7 @@ def main():
     valid_mrr = pre_trainer.evaluate('valid', expectation=True)
     test_mrr = pre_trainer.evaluate('test', expectation=True)
 
-    RulE_model.add_param()
+    # RulE_model.add_param()
 
     # checkpoint = torch.load(os.path.join(args.save_path, 'grounding.pt'))
     # RulE_model.load_state_dict(checkpoint['model'])
